@@ -83,13 +83,38 @@ class CallsModel implements SymbolItemNavigation<CallItem>, SymbolItemEditorHigh
 		this.roots = items.map(item => new CallItem(this, item, undefined, undefined));
 	}
 
+	private getGroupedIncomingCalls(call: CallItem, incomingCalls: vscode.CallHierarchyIncomingCall[]): CallItem[] {
+		return incomingCalls.map(item => new CallItem(this, item.from, call, item.fromRanges.map(range => new vscode.Location(item.from.uri, range))));
+	}
+
+	private getGroupedOutgoingCalls(call: CallItem, outgoingCalls: vscode.CallHierarchyOutgoingCall[]): CallItem[] {
+		return outgoingCalls.map(item => new CallItem(this, item.to, call, item.fromRanges.map(range => new vscode.Location(item.to.uri, range))));
+	}
+
+	private getFlatIncomingCalls(call: CallItem, incomingCalls: vscode.CallHierarchyIncomingCall[]): CallItem[] {
+		return incomingCalls.flatMap(item =>
+			item.fromRanges.map(range =>
+				new CallItem(this, item.from, call, [new vscode.Location(item.from.uri, range)])
+			)
+		);
+	}
+
+	private getFlatOutgoingCalls(call: CallItem, outgoingCalls: vscode.CallHierarchyOutgoingCall[]): CallItem[] {
+		return outgoingCalls.flatMap(item =>
+			item.fromRanges.map(range =>
+				new CallItem(this, item.to, call, [new vscode.Location(item.to.uri, range)])
+			)
+		);
+	}
+
 	private async _resolveCalls(call: CallItem): Promise<CallItem[]> {
+		const groupCalls = vscode.workspace.getConfiguration('references').get<boolean>('groupCalls', true);
 		if (this.direction === CallsDirection.Incoming) {
 			const calls = await vscode.commands.executeCommand<vscode.CallHierarchyIncomingCall[]>('vscode.provideIncomingCalls', call.item);
-			return calls ? calls.map(item => new CallItem(this, item.from, call, item.fromRanges.map(range => new vscode.Location(item.from.uri, range)))) : [];
+			return calls ? (groupCalls ? this.getGroupedIncomingCalls(call, calls) : this.getFlatIncomingCalls(call, calls)) : [];
 		} else {
 			const calls = await vscode.commands.executeCommand<vscode.CallHierarchyOutgoingCall[]>('vscode.provideOutgoingCalls', call.item);
-			return calls ? calls.map(item => new CallItem(this, item.to, call, item.fromRanges.map(range => new vscode.Location(call.item.uri, range)))) : [];
+			return calls ? (groupCalls ? this.getGroupedOutgoingCalls(call, calls) : this.getFlatOutgoingCalls(call, calls)) : [];
 		}
 	}
 
@@ -173,10 +198,19 @@ class CallItemDataProvider implements vscode.TreeDataProvider<CallItem> {
 		this._modelListener.dispose();
 	}
 
+	getLocationString(element: CallItem): string | undefined {
+		const fileComponent = element.item.uri.path.split('/').at(-1) ?? '';
+		const locations = element.locations?.map(loc => loc.range.start.line + 1).join(', ');
+		const result = `${fileComponent}${locations ? `:${locations}` : ''}`;
+
+		return result ? result : undefined;
+	}
+
 	getTreeItem(element: CallItem): vscode.TreeItem {
 
 		const item = new vscode.TreeItem(element.item.name);
-		item.description = element.item.detail;
+		const locationString = this.getLocationString(element);
+		item.description = locationString ? `${element.item.detail} ${locationString}` : element.item.detail;
 		item.tooltip = item.label && element.item.detail ? `${item.label} - ${element.item.detail}` : item.label ? `${item.label}` : element.item.detail;
 		item.contextValue = 'call-item';
 		item.iconPath = getThemeIcon(element.item.kind);

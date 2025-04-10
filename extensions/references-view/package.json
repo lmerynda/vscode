@@ -43,6 +43,11 @@
             "%config.references.preferredLocation.peek%",
             "%config.references.preferredLocation.view%"
           ]
+        },
+        "references.groupCalls": {
+          "description": "%config.references.groupCalls%",
+          "type": "boolean",
+          "default": true
         }
       }
     },
